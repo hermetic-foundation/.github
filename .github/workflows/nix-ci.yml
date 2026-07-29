@@ -28,6 +28,10 @@ on:
         required: false
         type: string
         default: arn:aws:iam::913433059611:role/MonarchicNixBinaryCacheRole
+    secrets:
+      MONARCHIC_GITHUB_PAT:
+        description: "Optional GitHub token for private flake inputs outside the caller repository."
+        required: false
   workflow_dispatch:
     inputs:
       publish_cache:
@@ -51,8 +55,10 @@ jobs:
       MONARCHIC_NIX_CACHE_BUCKET: ${{ inputs.cache_bucket || vars.MONARCHIC_NIX_CACHE_BUCKET || 'monarchic-production-nix-binary-cache-913433059611-us-east-2' }}
       MONARCHIC_NIX_CACHE_SECRET_ID: ${{ inputs.cache_secret_id || vars.MONARCHIC_NIX_CACHE_SECRET_ID || 'monarchic/production/nix-binary-cache-signing-key' }}
       MONARCHIC_NIX_CACHE_AWS_ROLE_ARN: ${{ inputs.aws_role_arn || vars.MONARCHIC_NIX_CACHE_AWS_ROLE_ARN || 'arn:aws:iam::913433059611:role/MonarchicNixBinaryCacheRole' }}
+      MONARCHIC_GITHUB_TOKEN: ${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
       NIX_CONFIG: |
         experimental-features = nix-command flakes
+        access-tokens = github.com=${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
         accept-flake-config = true
         substituters = https://cache.nixos.org
         trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
@@ -64,9 +70,10 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
-          github_access_token: ${{ github.token }}
+          github_access_token: ${{ env.MONARCHIC_GITHUB_TOKEN }}
           extra_nix_config: |
             experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
             accept-flake-config = true
             substituters = https://cache.nixos.org
             trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
