@@ -151,8 +151,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          sort -u "$RUNNER_TEMP/monarchic-nix-ci-paths" \
-            | awk '/^\/nix\/store\//' > "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
+          : > "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
+          while IFS= read -r store_path; do
+            if [[ "$store_path" == /nix/store/* ]]; then
+              printf '%s\n' "$store_path" >> "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
+            fi
+          done < <(sort -u "$RUNNER_TEMP/monarchic-nix-ci-paths")
 
           if [ ! -s "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted" ]; then
             echo "No Nix store paths were built; nothing to publish."
