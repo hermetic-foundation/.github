@@ -47,7 +47,7 @@ permissions:
 jobs:
   nix-ci:
     name: Nix CI
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted","Linux","X64","monarchic-local","nixos"]') }}
     timeout-minutes: 90
 
     env:
