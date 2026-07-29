@@ -13,9 +13,9 @@ Use `.github/workflows/nix-ci.yml` from repositories with a Nix flake:
 name: Nix CI
 
 on:
-  pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   nix-ci:
@@ -27,4 +27,5 @@ jobs:
 The reusable workflow runs on `vars.CI_RUNNER_LABELS`, builds every
 `packages.${system}` output, builds every `checks.${system}` output, runs
 `nix flake check`, and optionally signs and uploads built store paths to the
-Monarchic Nix binary cache. Cache publishing is skipped for pull requests.
+Monarchic Nix binary cache. It is intended to run for trusted pushes to `main`,
+including merges, and for manual dispatches.
