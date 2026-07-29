@@ -1,0 +1,166 @@
+name: Nix CI
+
+on:
+  workflow_call:
+    inputs:
+      publish_cache:
+        description: "Whether to publish built closures to the Monarchic Nix binary cache."
+        required: false
+        type: boolean
+        default: false
+      cache_region:
+        description: "AWS region for the Monarchic Nix binary cache."
+        required: false
+        type: string
+        default: us-east-2
+      cache_bucket:
+        description: "S3 bucket that stores the Monarchic Nix binary cache."
+        required: false
+        type: string
+        default: monarchic-production-nix-binary-cache-913433059611-us-east-2
+      cache_secret_id:
+        description: "AWS Secrets Manager secret id for the Nix signing key."
+        required: false
+        type: string
+        default: monarchic/production/nix-binary-cache-signing-key
+      aws_role_arn:
+        description: "AWS role ARN allowed to write to the Monarchic Nix binary cache."
+        required: false
+        type: string
+        default: arn:aws:iam::913433059611:role/MonarchicNixBinaryCacheRole
+  workflow_dispatch:
+    inputs:
+      publish_cache:
+        description: "Publish built closures to the Monarchic Nix binary cache."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  nix-ci:
+    name: Nix CI
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS) }}
+    timeout-minutes: 90
+
+    env:
+      MONARCHIC_NIX_CACHE_REGION: ${{ inputs.cache_region || vars.MONARCHIC_NIX_CACHE_REGION || 'us-east-2' }}
+      MONARCHIC_NIX_CACHE_BUCKET: ${{ inputs.cache_bucket || vars.MONARCHIC_NIX_CACHE_BUCKET || 'monarchic-production-nix-binary-cache-913433059611-us-east-2' }}
+      MONARCHIC_NIX_CACHE_SECRET_ID: ${{ inputs.cache_secret_id || vars.MONARCHIC_NIX_CACHE_SECRET_ID || 'monarchic/production/nix-binary-cache-signing-key' }}
+      MONARCHIC_NIX_CACHE_AWS_ROLE_ARN: ${{ inputs.aws_role_arn || vars.MONARCHIC_NIX_CACHE_AWS_ROLE_ARN || 'arn:aws:iam::913433059611:role/MonarchicNixBinaryCacheRole' }}
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        accept-flake-config = true
+        substituters = https://cache.nixos.org
+        trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ github.token }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+            substituters = https://cache.nixos.org
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
+
+      - name: Build package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          system="$(nix eval --raw --impure --expr builtins.currentSystem)"
+          mapfile -t attrs < <(
+            # shellcheck disable=SC2016
+            nix eval --raw --impure --expr '
+              let
+                flake = builtins.getFlake (toString ./.);
+                system = builtins.currentSystem;
+                packages = flake.packages.${system} or {};
+              in
+                builtins.concatStringsSep "\n" (builtins.attrNames packages)
+            '
+          )
+
+          : > "$RUNNER_TEMP/monarchic-nix-ci-paths"
+
+          if [ "${#attrs[@]}" -eq 0 ]; then
+            echo "No packages.${system} outputs to build."
+            exit 0
+          fi
+
+          for attr in "${attrs[@]}"; do
+            nix build --print-out-paths ".#${attr}" | tee -a "$RUNNER_TEMP/monarchic-nix-ci-paths"
+          done
+
+      - name: Build check outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          system="$(nix eval --raw --impure --expr builtins.currentSystem)"
+          mapfile -t attrs < <(
+            # shellcheck disable=SC2016
+            nix eval --raw --impure --expr '
+              let
+                flake = builtins.getFlake (toString ./.);
+                system = builtins.currentSystem;
+                checks = flake.checks.${system} or {};
+              in
+                builtins.concatStringsSep "\n" (builtins.attrNames checks)
+            '
+          )
+
+          if [ "${#attrs[@]}" -eq 0 ]; then
+            echo "No checks.${system} outputs to build."
+            exit 0
+          fi
+
+          for attr in "${attrs[@]}"; do
+            nix build --print-out-paths ".#checks.${system}.${attr}" | tee -a "$RUNNER_TEMP/monarchic-nix-ci-paths"
+          done
+
+      - name: Run flake checks
+        shell: bash
+        run: nix flake check
+
+      - name: Configure production AWS credentials
+        if: ${{ inputs.publish_cache && github.event_name != 'pull_request' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.MONARCHIC_NIX_CACHE_AWS_ROLE_ARN }}
+          aws-region: ${{ env.MONARCHIC_NIX_CACHE_REGION }}
+
+      - name: Publish binary cache
+        if: ${{ inputs.publish_cache && github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sort -u "$RUNNER_TEMP/monarchic-nix-ci-paths" \
+            | awk '/^\/nix\/store\//' > "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
+
+          if [ ! -s "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted" ]; then
+            echo "No Nix store paths were built; nothing to publish."
+            exit 0
+          fi
+
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+
+          aws secretsmanager get-secret-value \
+            --region "$MONARCHIC_NIX_CACHE_REGION" \
+            --secret-id "$MONARCHIC_NIX_CACHE_SECRET_ID" \
+            --query SecretString \
+            --output text > "$key_file"
+
+          nix store sign --key-file "$key_file" --stdin < "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
+          nix copy --to "s3://${MONARCHIC_NIX_CACHE_BUCKET}?region=${MONARCHIC_NIX_CACHE_REGION}&compression=zstd" \
+            --stdin < "$RUNNER_TEMP/monarchic-nix-ci-paths.sorted"
