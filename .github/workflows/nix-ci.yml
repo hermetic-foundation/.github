@@ -28,11 +28,6 @@ on:
         required: false
         type: string
         default: arn:aws:iam::913433059611:role/MonarchicNixBinaryCacheRole
-      runner_labels:
-        description: "JSON array of labels for the Linux CI runner."
-        required: false
-        type: string
-        default: '["self-hosted","Linux","X64","monarchic-local","nixos"]'
     secrets:
       MONARCHIC_GITHUB_PAT:
         description: "Optional GitHub token for private flake inputs outside the caller repository."
@@ -52,7 +47,12 @@ permissions:
 jobs:
   nix-ci:
     name: Nix CI
-    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - monarchic-local
+      - nixos
     timeout-minutes: 90
 
     env:

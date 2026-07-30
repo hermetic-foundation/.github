@@ -28,11 +28,6 @@ on:
         required: false
         type: number
         default: 30
-      runner_labels:
-        description: "JSON array of labels for the Linux CI runner."
-        required: false
-        type: string
-        default: '["self-hosted","Linux","X64","monarchic-local","nixos"]'
     secrets:
       MONARCHIC_GITHUB_PAT:
         description: "Optional GitHub token for private flake inputs outside the caller repository."
@@ -44,7 +39,12 @@ permissions:
 jobs:
   maintenance:
     name: Maintenance
-    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+      - monarchic-local
+      - nixos
     timeout-minutes: ${{ inputs.timeout_minutes }}
 
     env:
