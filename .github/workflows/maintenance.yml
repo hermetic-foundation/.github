@@ -1,0 +1,134 @@
+name: Maintenance
+
+on:
+  workflow_call:
+    inputs:
+      check_flake:
+        description: "Whether to evaluate the caller flake before running maintenance."
+        required: false
+        type: boolean
+        default: true
+      maintenance_command:
+        description: "Optional repo-local maintenance command to run after flake evaluation."
+        required: false
+        type: string
+        default: ""
+      report_path:
+        description: "Path to write a maintenance report artifact."
+        required: false
+        type: string
+        default: maintenance-report.md
+      report_artifact_name:
+        description: "Uploaded artifact name for the maintenance report."
+        required: false
+        type: string
+        default: maintenance-report
+      timeout_minutes:
+        description: "Maximum maintenance runtime in minutes."
+        required: false
+        type: number
+        default: 30
+    secrets:
+      MONARCHIC_GITHUB_PAT:
+        description: "Optional GitHub token for private flake inputs outside the caller repository."
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  maintenance:
+    name: Maintenance
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted","Linux","X64","monarchic-local","nixos"]') }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+
+    env:
+      MONARCHIC_GITHUB_TOKEN: ${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
+      REPORT_PATH: ${{ inputs.report_path }}
+      MAINTENANCE_COMMAND: ${{ inputs.maintenance_command }}
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        access-tokens = github.com=${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
+        accept-flake-config = true
+        substituters = https://cache.nixos.org
+        trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ env.MONARCHIC_GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.MONARCHIC_GITHUB_PAT || github.token }}
+            accept-flake-config = true
+            substituters = https://cache.nixos.org
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWVMkYbcAA1q6Y2OkQbBWBV88F2rI=
+
+      - name: Run maintenance checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "# Maintenance Report"
+            echo
+            echo "- Repository: ${GITHUB_REPOSITORY}"
+            echo "- Ref: ${GITHUB_REF}"
+            echo "- SHA: ${GITHUB_SHA}"
+            echo "- Event: ${GITHUB_EVENT_NAME}"
+            echo "- Runner: ${RUNNER_NAME}"
+            echo
+          } > "$REPORT_PATH"
+
+          if [ "${{ inputs.check_flake }}" = "true" ]; then
+            {
+              echo "## Nix flake check"
+            } >> "$REPORT_PATH"
+            if nix flake check --no-build >> "$REPORT_PATH" 2>&1; then
+              {
+                echo
+                echo "Result: pass"
+              } >> "$REPORT_PATH"
+            else
+              {
+                echo
+                echo "Result: fail"
+              } >> "$REPORT_PATH"
+              exit 1
+            fi
+          fi
+
+          if [ -n "$MAINTENANCE_COMMAND" ]; then
+            {
+              echo
+              echo "## Maintenance command"
+              echo '```console'
+              echo "$MAINTENANCE_COMMAND"
+              echo '```'
+            } >> "$REPORT_PATH"
+            if bash -euo pipefail -c "$MAINTENANCE_COMMAND" >> "$REPORT_PATH" 2>&1; then
+              {
+                echo
+                echo "Result: pass"
+              } >> "$REPORT_PATH"
+            else
+              {
+                echo
+                echo "Result: fail"
+              } >> "$REPORT_PATH"
+              exit 1
+            fi
+          fi
+
+          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload maintenance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.report_artifact_name }}
+          path: ${{ inputs.report_path }}
+          if-no-files-found: error

@@ -50,3 +50,61 @@ checks that the tag matches `v*.*.*` by default, verifies that the tag points at
 `Nix CI` workflow run for the tagged commit. It performs no publishing or
 deployment itself; caller workflows keep repo-specific release steps behind
 this preflight job.
+
+### Maintenance
+
+Use `.github/workflows/maintenance.yml` from scheduled or manual caller
+workflows that should produce a report before any automation becomes mutating:
+
+```yaml
+name: Maintenance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+jobs:
+  maintenance:
+    uses: monarchic-meta/.github/.github/workflows/maintenance.yml@main
+    with:
+      check_flake: true
+      maintenance_command: nix run .#maintenance-report
+    secrets: inherit
+```
+
+The reusable workflow runs on `vars.CI_RUNNER_LABELS`, optionally evaluates
+`nix flake check --no-build`, optionally runs a repo-local maintenance command,
+writes a Markdown report to the job summary, and uploads it as an artifact. It
+does not push commits, open pull requests, deploy, publish, or mutate external
+systems by default.
+
+### Docker CI
+
+Use `.github/workflows/docker-ci.yml` only for repositories where Docker is
+still an explicit build or runtime contract:
+
+```yaml
+name: Docker CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  docker-ci:
+    uses: monarchic-meta/.github/.github/workflows/docker-ci.yml@main
+    with:
+      runner_labels: '["self-hosted","Linux","X64","monarchic-local","docker"]'
+      context: .
+      dockerfile: Dockerfile
+      image_name: example-docker-ci
+      smoke_command: docker run --rm example-docker-ci --version
+```
+
+The reusable workflow requires a Docker-capable runner label set, verifies
+Docker availability, builds the requested image, and optionally runs a smoke
+command. Prefer moving build, test, lint, smoke, and security behavior into
+flake checks and using `nix-ci.yml` when Docker is not part of the repo's real
+contract.

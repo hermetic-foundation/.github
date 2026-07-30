@@ -1,0 +1,74 @@
+name: Docker CI
+
+on:
+  workflow_call:
+    inputs:
+      runner_labels:
+        description: "JSON array of labels for a Docker-capable runner."
+        required: false
+        type: string
+        default: '["self-hosted","Linux","X64","monarchic-local","docker"]'
+      context:
+        description: "Docker build context."
+        required: false
+        type: string
+        default: "."
+      dockerfile:
+        description: "Dockerfile path."
+        required: false
+        type: string
+        default: Dockerfile
+      image_name:
+        description: "Local image name to build."
+        required: false
+        type: string
+        default: monarchic-docker-ci
+      build_args:
+        description: "Optional extra docker build arguments."
+        required: false
+        type: string
+        default: ""
+      smoke_command:
+        description: "Optional command to run after the image is built."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  docker-ci:
+    name: Docker CI
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Verify Docker is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+
+      - name: Build image
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ inputs.build_args }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          CONTEXT: ${{ inputs.context }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          docker build $BUILD_ARGS --file "$DOCKERFILE" --tag "$IMAGE_NAME" "$CONTEXT"
+
+      - name: Run smoke command
+        if: ${{ inputs.smoke_command != '' }}
+        shell: bash
+        env:
+          SMOKE_COMMAND: ${{ inputs.smoke_command }}
+        run: bash -euo pipefail -c "$SMOKE_COMMAND"
