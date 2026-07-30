@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: Nix CI
+      runner_labels:
+        description: "JSON array of labels for the Linux CI runner."
+        required: false
+        type: string
+        default: '["self-hosted","Linux","X64","monarchic-local","nixos"]'
 
 permissions:
   actions: read
@@ -26,7 +31,7 @@ permissions:
 jobs:
   release-preflight:
     name: Release preflight
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS) }}
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
     timeout-minutes: 10
     steps:
       - name: Check out repository
