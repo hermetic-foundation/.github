@@ -26,7 +26,7 @@ permissions:
 jobs:
   release-preflight:
     name: Release preflight
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted","Linux","X64","monarchic-local","nixos"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS) }}
     timeout-minutes: 10
     steps:
       - name: Check out repository

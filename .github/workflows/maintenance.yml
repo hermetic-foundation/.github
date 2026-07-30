@@ -39,7 +39,7 @@ permissions:
 jobs:
   maintenance:
     name: Maintenance
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted","Linux","X64","monarchic-local","nixos"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
 
     env:
