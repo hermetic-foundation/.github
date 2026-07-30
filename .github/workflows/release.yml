@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      tag_pattern:
+        description: "Extended regular expression that release tags must match."
+        required: false
+        type: string
+        default: '^v[0-9]+[.][0-9]+[.][0-9]+$'
+      default_branch:
+        description: "Branch the release tag must point at."
+        required: false
+        type: string
+        default: main
+      required_workflow:
+        description: "Workflow name that must have passed for the tagged commit."
+        required: false
+        type: string
+        default: Nix CI
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  release-preflight:
+    name: Release preflight
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["self-hosted","Linux","X64","monarchic-local","nixos"]') }}
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default_branch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          TAG_PATTERN: ${{ inputs.tag_pattern }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
+            echo "Release workflow must run from a tag ref."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$RELEASE_TAG" | grep -Eq "$TAG_PATTERN"; then
+            echo "Release tag '$RELEASE_TAG' does not match pattern '$TAG_PATTERN'."
+            exit 1
+          fi
+
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          tag_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          branch_sha="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+          if [ "$tag_sha" != "$branch_sha" ]; then
+            echo "Release tag '$RELEASE_TAG' points at $tag_sha, but origin/$DEFAULT_BRANCH is $branch_sha."
+            exit 1
+          fi
+
+      - name: Verify required CI completed
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const workflowName = '${{ inputs.required_workflow }}';
+            const { owner, repo } = context.repo;
+            const head_sha = context.sha;
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner,
+              repo,
+              head_sha,
+              per_page: 100
+            });
+
+            const matching = runs
+              .filter((run) => run.name === workflowName)
+              .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+            if (matching.length === 0) {
+              core.setFailed(`No '${workflowName}' workflow run found for ${head_sha}.`);
+              return;
+            }
+
+            const latest = matching[0];
+            if (latest.status !== 'completed' || latest.conclusion !== 'success') {
+              core.setFailed(`Latest '${workflowName}' run for ${head_sha} is ${latest.status}/${latest.conclusion}.`);
+              return;
+            }
+
+            core.info(`Verified '${workflowName}' run ${latest.id} passed for ${head_sha}.`);
