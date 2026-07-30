@@ -166,7 +166,7 @@ jobs:
           key_file="$(mktemp)"
           trap 'rm -f "$key_file"' EXIT
 
-          aws secretsmanager get-secret-value \
+          nix shell nixpkgs#awscli2 -c aws secretsmanager get-secret-value \
             --region "$MONARCHIC_NIX_CACHE_REGION" \
             --secret-id "$MONARCHIC_NIX_CACHE_SECRET_ID" \
             --query SecretString \
