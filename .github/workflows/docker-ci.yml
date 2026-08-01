@@ -23,11 +23,21 @@ on:
         required: false
         type: string
         default: monarchic-docker-ci
+      build_image:
+        description: "Whether to build a Docker image before running the smoke command."
+        required: false
+        type: boolean
+        default: true
       build_args:
         description: "Optional extra docker build arguments."
         required: false
         type: string
         default: ""
+      install_nix:
+        description: "Whether to install Nix before running the smoke command."
+        required: false
+        type: boolean
+        default: false
       smoke_command:
         description: "Optional command to run after the image is built."
         required: false
@@ -47,6 +57,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Install Nix
+        if: ${{ inputs.install_nix }}
+        uses: cachix/install-nix-action@v31
+
       - name: Verify Docker is available
         shell: bash
         run: |
@@ -55,6 +69,7 @@ jobs:
           docker info
 
       - name: Build image
+        if: ${{ inputs.build_image }}
         shell: bash
         env:
           BUILD_ARGS: ${{ inputs.build_args }}
