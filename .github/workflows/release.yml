@@ -92,6 +92,7 @@ jobs:
       - name: Verify required CI completed
         uses: actions/github-script@v8
         with:
+          retries: 5
           script: |
             const workflowName = '${{ inputs.required_workflow }}';
             const { owner, repo } = context.repo;
